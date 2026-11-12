@@ -1,0 +1,36 @@
+# Segredos e ambiente local
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.vercel/
+.supabase/
+
+# Dados exportados (podem conter dados pessoais ou comerciais)
+dados/
+export/
+backup/
+*.sql.bak
+supabase/seed*.sql
+supabase/.temp/
+
+# Planilhas de trabalho (dados reais)
+*.xlsx
+*.xls
+*.csv
+
+# Dependências e builds, caso o projeto passe a usar npm
+node_modules/
+dist/
+.cache/
+
+# Sistema e editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/settings.json
+*.log
+*.tmp
