@@ -17,25 +17,44 @@ function obrigatoria(k: string) {
   return v;
 }
 
-Deno.serve(async (req) => {
-  // Exige o segredo no cabeçalho (a chave anon do app é pública e passaria na verificação de JWT).
+// O app (navegador) chama a função, então responde ao pré-voo CORS. A proteção é a autenticação abaixo.
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-ler-emails-segredo',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+const json = (obj: unknown, status = 200) => Response.json(obj, { status, headers: CORS });
+
+// Autorizado se: (a) o cabeçalho x-ler-emails-segredo bate (agendamento/testes), ou
+// (b) o Bearer é o login de um usuário com papel "editor" (botão do app).
+async function autorizado(req: Request, sb: any): Promise<boolean> {
   const segredo = env('LER_EMAILS_SEGREDO');
-  if (!segredo || req.headers.get('x-ler-emails-segredo') !== segredo) {
-    return Response.json({ erro: 'Não autorizado' }, { status: 401 });
-  }
+  if (segredo && req.headers.get('x-ler-emails-segredo') === segredo) return true;
+  const auth = req.headers.get('authorization') ?? '';
+  const jwt = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!jwt) return false;
+  const { data: u } = await sb.auth.getUser(jwt);
+  if (!u?.user) return false;
+  const { data: m } = await sb.from('membros').select('papel').eq('user_id', u.user.id).maybeSingle();
+  return m?.papel === 'editor';
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   // ?simular=1 lê e analisa, mas NÃO grava nada no banco.
   const simular = new URL(req.url).searchParams.get('simular') === '1';
   const res = { simulacao: simular, lidos: 0, remetente_nao_autorizado: 0, nao_reconhecidos: 0, novos: 0, novos_simulados: 0, ja_existiam: 0 };
   try {
     const supaUrl = obrigatoria('SUPABASE_URL');
     if (supaUrl.includes(PROJETO_PRODUCAO) && env('AMBIENTE') !== 'producao') {
-      return Response.json({ erro: 'Recusado: projeto de produção sem AMBIENTE=producao.' }, { status: 403 });
+      return json({ erro: 'Recusado: projeto de produção sem AMBIENTE=producao.' }, 403);
     }
+    const sb = createClient(supaUrl, obrigatoria('SUPABASE_SERVICE_ROLE_KEY'));
+    if (!(await autorizado(req, sb))) return json({ erro: 'Não autorizado' }, 401);
     const caixa = obrigatoria('CAIXA_NOME');
     const remetentes = env('REMETENTES_AUTORIZADOS', '');
     const janela = Number(env('JANELA_DIAS', '3'));
     const maximo = Number(env('MAX_POR_EXECUCAO', '200'));
-    const sb = createClient(supaUrl, obrigatoria('SUPABASE_SERVICE_ROLE_KEY'));
 
     const cfg = await sb.from('documentos').select('dados').eq('colecao', 'config').eq('id', 'geral').maybeSingle();
     const origens = cfg.data?.dados?.origens ?? [];
@@ -90,8 +109,8 @@ Deno.serve(async (req) => {
       if (error) throw new Error(`Gravação falhou: ${error.message}`);
       if (data?.length) res.novos++; else res.ja_existiam++;
     }
-    return Response.json(res); // só contagens: nunca devolve nem registra dados de leads
+    return json(res); // só contagens: nunca devolve nem registra dados de leads
   } catch (e) {
-    return Response.json({ ...res, erro: String(e?.message ?? e) }, { status: 500 });
+    return json({ ...res, erro: String(e?.message ?? e) }, 500);
   }
 });
