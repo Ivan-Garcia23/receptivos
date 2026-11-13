@@ -240,6 +240,11 @@ body.pipbody{padding:10px}
 .mlink{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--surface2);color:var(--ink);font-size:13px}
 .wbox p{margin:10px 0 0;font-size:14px}
 .wact{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.tag.warn{background:color-mix(in srgb,var(--meta) 18%,transparent);color:var(--meta)}
+.prerow{cursor:pointer}.prerow:hover td{background:var(--surface2)}
+.prerow:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.tabn{display:inline-block;min-width:18px;margin-left:6px;padding:0 6px;border-radius:9px;background:var(--meta);color:var(--accent-ink);font-size:12px;line-height:18px;text-align:center}
+.tabn:empty{display:none}
 .wtag{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:color-mix(in srgb,var(--meta) 22%,transparent);color:var(--meta)}
 .metacfg{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;padding:12px 18px}
 .metacfg h2{margin:0}
@@ -277,7 +282,7 @@ body.is-auth .tabs,body.is-auth #btn-sair{display:none}
 <header class="top"><div class="top-in">
   <div class="brand"><svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><rect x="1" y="1" width="24" height="24" rx="7" fill="var(--accent)"/><path d="M13 5v10m0 0-4-4m4 4 4-4M7 17v2.5h12V17" stroke="var(--accent-ink)" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Receptivos</div>
   <span class="status" id="status" aria-live="polite"></span>
-  <nav class="tabs" aria-label="Seções"><button class="tab" data-v="painel">Painel</button><button class="tab" data-v="lancar">Lançar</button><button class="tab" data-v="config">Configurações</button></nav>
+  <nav class="tabs" aria-label="Seções"><button class="tab" data-v="painel">Painel</button><button class="tab" data-v="lancar">Lançar</button><button class="tab" data-v="pre">Pré-cadastros<span class="tabn" id="pre-n"></span></button><button class="tab" data-v="config">Configurações</button></nav>
   <button class="btn sm" id="btn-sair" hidden>Sair</button>
 </div></header>
 <main id="main"></main>
@@ -361,7 +366,7 @@ const hoje=new Date();
 const S={db:null,user:null,canWrite:true,cfg:null,meses:{},ready:false,falha:null,
   view:'painel',mes:keyOf(hoje.getFullYear(),hoje.getMonth()+1),modo:'mes',
   dirty:{},saving:{},pending:{},timers:{},showOrig:false,lancModo:'dia',diaN:hoje.getDate(),remotoPendente:false,importado:null,dl:null};
-(function(){const h=location.hash.replace('#','');if(['painel','lancar','config','mini'].includes(h))S.view=h;})();
+(function(){const h=location.hash.replace('#','');if(['painel','lancar','pre','config','mini'].includes(h))S.view=h;})();
 
 // ===== cálculo =====
 function calcMes(k){
@@ -407,8 +412,9 @@ function render(){
   if(S.view==='painel')renderPainel(m);
   else if(S.view==='mini')m.innerHTML=miniHtml(false);
   else if(S.view==='lancar')renderLancar(m);
+  else if(S.view==='pre')renderPre(m);
   else renderConfig(m);
-  updStatus();
+  updPreBadge();updStatus();
 }
 function updStatus(){
   const st=$('#status');if(!st)return;
@@ -849,6 +855,121 @@ async function salvarCfg(){
   catch(e){toast(e&&e.code==='invalid_argument'?'Seu acesso não permite alterar as configurações.':'Não foi possível salvar as configurações.',4000);}
 }
 
+// ===== pré-cadastros (avisos de e-mail) =====
+// Dados vêm da tabela public.pre_cadastros (preenchida pela função ler-emails). Aprovar lança via aplicarLanc.
+// Modo demonstração: abrir com #pre-demo (dados fictícios em memória, nada é gravado nem lançado).
+const PRE={estado:'idle',itens:[],filtro:'pendente',sel:null,demo:false,ocupado:false,erro:''};
+const PRE_FONTE={'rd-station':'RD Station','site-criasoft':'Site Criasoft','lp-synlua':'LP Synlua'};
+const PRE_SIT={pendente:['none','Pendente'],aprovado:['ok','Aprovado'],descartado:['bad','Descartado']};
+(function(){if(location.hash==='#pre-demo'){PRE.demo=true;S.view='pre';}})();
+function criarPre(sb){
+  const erro=error=>{const e=new Error(error.message);e.code=(error.code==='42501'||/row-level security/i.test(error.message||''))?'invalid_argument':(error.code||'erro');return e;};
+  return {
+    async listar(){const {data,error}=await sb.from('pre_cadastros').select('id,fonte,recebido_em,nome,empresa,cidade,origem_bruta,origem_id,lead_hash,status').order('recebido_em',{ascending:false}).limit(500);if(error)throw erro(error);return data||[];},
+    async decidir(id,status,uid){const {data,error}=await sb.from('pre_cadastros').update({status,decidido_por:uid,decidido_em:new Date().toISOString()}).eq('id',id).eq('status','pendente').select('id');if(error)throw erro(error);return (data||[]).length>0;}
+  };
+}
+function preDemoDados(){
+  const iso=(dias,h)=>{const d=new Date();d.setDate(d.getDate()-dias);d.setHours(h,15,0,0);return d.toISOString();};
+  const o1=((S.cfg.origens||[]).find(x=>x.ativo)||{}).id||null;
+  const r=(id,fonte,q,nome,empresa,cidade,ob,oid,h,st)=>({id,fonte,recebido_em:q,nome,empresa,cidade,origem_bruta:ob,origem_id:oid,lead_hash:h,status:st});
+  return [
+    r('d1','rd-station',iso(0,9),'Maria Exemplo','Laboratório Exemplo','Cuiabá','Referência',null,'h1','pendente'),
+    r('d2','site-criasoft',iso(0,10),'Maria Exemplo','Laboratório Exemplo','Cuiabá','Redes Sociais',o1,'h1','pendente'),
+    r('d3','lp-synlua',iso(0,11),'Carlos Exemplo','Clínica Teste','Sorocaba','Google',o1,'h2','pendente'),
+    r('d6','lp-synlua',iso(0,12),'Dora Exemplo','em criação','Araçatuba','Google',o1,'h5','pendente'),
+    r('d4','site-criasoft',iso(1,15),'Joana Teste','Alfa Exemplo','Porto Seguro','Redes Sociais',o1,'h3','aprovado'),
+    r('d5','rd-station',iso(2,8),'Pedro Demo','Beta Demo','Campinas','Referência',null,'h4','descartado')
+  ];
+}
+const preDia=r=>{const d=new Date(r.recebido_em);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+const preQuando=r=>{const d=new Date(r.recebido_em);return d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});};
+// Duplicado = mesmo e-mail de lead (hash) no mesmo dia. O mais antigo é "Tem duplicado"; os demais, "Duplicado".
+function preAnexar(itens){
+  const g={};itens.forEach(r=>{r._outros=0;r._dup=false;if(!r.lead_hash)return;const k=r.lead_hash+'|'+preDia(r);(g[k]=g[k]||[]).push(r);});
+  Object.values(g).forEach(l=>{if(l.length<2)return;l.sort((a,b)=>new Date(a.recebido_em)-new Date(b.recebido_em));l.forEach((r,i)=>{r._outros=l.length-1;r._dup=i>0;});});
+}
+function updPreBadge(){const nb=$('#pre-n');if(nb)nb.textContent=PRE.estado==='ok'?(PRE.itens.filter(r=>r.status==='pendente').length||''):'';}
+async function carregarPre(){
+  if(PRE.demo){PRE.itens=preDemoDados();PRE.estado='ok';return;}
+  PRE.estado='carregando';
+  try{PRE.itens=await S.db.pre.listar();PRE.estado='ok';}
+  catch(e){PRE.estado=(e.code==='PGRST205'||e.code==='42P01')?'indisponivel':'erro';PRE.erro=e.message;}
+  if(S.view==='pre')render();else updPreBadge();
+}
+function renderPre(m){
+  if(PRE.estado==='idle'){if(PRE.demo){PRE.itens=preDemoDados();PRE.estado='ok';}else carregarPre();}
+  let h='<div class="card"><h2>Pré-cadastros</h2><p class="sub">Contatos identificados nos e-mails de formulário. Aprove para lançar como receptivo ou descarte.'+(PRE.demo?' <b>Modo demonstração: dados fictícios, nada é gravado nem lançado.</b>':'')+'</p>';
+  if(PRE.estado==='idle'||PRE.estado==='carregando')h+='<div class="loading">Carregando…</div>';
+  else if(PRE.estado==='indisponivel')h+='<p class="empty">Este recurso ainda não foi ativado neste banco de dados.</p>';
+  else if(PRE.estado==='erro')h+=`<p class="empty">Não foi possível carregar os pré-cadastros (${esc(PRE.erro)}).</p>`;
+  else h+=preTabela();
+  m.innerHTML=h+'</div>';
+}
+function preTag(r){const [cl,tx]=PRE_SIT[r.status]||['none',r.status];return `<span class="tag ${cl}">${esc(tx)}</span>`+(r._outros?` <span class="tag warn" title="Mesmo e-mail de lead recebido ${r._outros+1} vezes no mesmo dia">${r._dup?'Duplicado':'Tem duplicado'}</span>`:'');}
+function preTabela(){
+  preAnexar(PRE.itens);
+  const cont=s=>PRE.itens.filter(r=>s==='todos'||r.status===s).length;
+  const fs=[['pendente','Pendentes'],['aprovado','Aprovados'],['descartado','Descartados'],['todos','Todos']];
+  let h='<div class="fieldrow"><div class="seg" role="group" aria-label="Filtrar por situação">'+fs.map(([k,t])=>`<button data-prefil="${k}" aria-pressed="${PRE.filtro===k}">${t} (${cont(k)})</button>`).join('')+'</div><button class="btn sm" data-preact="atualizar">Atualizar</button></div>';
+  const lista=PRE.itens.filter(r=>PRE.filtro==='todos'||r.status===PRE.filtro);
+  if(!lista.length)return h+'<p class="empty">Nenhum pré-cadastro nesta situação.</p>';
+  return h+'<div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Nome</th><th>Empresa</th><th>Cidade</th><th>Origem</th><th>Situação</th></tr></thead><tbody>'+
+    lista.map(r=>`<tr class="prerow" data-pre="${esc(r.id)}" tabindex="0"><td>${esc(preQuando(r))}</td><td><b>${esc(r.nome)||'—'}</b></td><td>${esc(r.empresa)||'—'}</td><td>${esc(r.cidade)||'—'}</td><td>${esc(r.origem_bruta)||'—'}</td><td>${preTag(r)}</td></tr>`).join('')+'</tbody></table></div>';
+}
+function preAbrir(id){PRE.sel=id;PRE.ocupado=false;renderPreModal();}
+function preFechar(){PRE.sel=null;const el=$('#wiz');el.innerHTML='';el.hidden=true;}
+function renderPreModal(){
+  const r=PRE.itens.find(x=>x.id===PRE.sel);if(!r){preFechar();return;}
+  const el=$('#wiz');el.hidden=false;
+  const pend=r.status==='pendente'&&S.canWrite;
+  const sel=(id,lista,atual,extra)=>`<select id="${id}">${extra}${(S.cfg[lista]||[]).filter(x=>x.ativo).map(x=>`<option value="${esc(x.id)}" ${atual===x.id?'selected':''}>${esc(x.nome)}</option>`).join('')}</select>`;
+  const tipoPad=((S.cfg.tipos||[]).find(t=>t.id==='receptivo'&&t.ativo)||(S.cfg.tipos||[]).find(t=>t.ativo)||{}).id;
+  let c=`<dl class="wsum"><dt>Situação</dt><dd>${preTag(r)}</dd><dt>Nome</dt><dd>${esc(r.nome)||'—'}</dd><dt>Empresa</dt><dd>${esc(r.empresa)||'—'}</dd><dt>Cidade</dt><dd>${esc(r.cidade)||'—'}</dd><dt>Fonte</dt><dd>${esc(PRE_FONTE[r.fonte]||r.fonte)}</dd><dt>Origem no e-mail</dt><dd>${esc(r.origem_bruta)||'—'}</dd><dt>Recebido</dt><dd>${esc(preQuando(r))}</dd></dl>`;
+  if(r._outros)c+=`<p class="note">Há ${r._outros} outro(s) aviso(s) do mesmo e-mail de lead neste dia. Confira antes de aprovar para não lançar duas vezes.</p>`;
+  if(pend){
+    c+=`<h3>Lançar como</h3><div class="fieldrow"><label class="f">Tipo${sel('pre-tipo','tipos',tipoPad,'')}</label><label class="f">Origem${sel('pre-orig','origens',r.origem_id,'<option value="-">Não informar</option>')}</label><label class="f">Vendedor${sel('pre-vend','vendedores',null,'<option value="-">Sem vendedor (atribuir depois)</option>')}</label></div>`;
+    if(!r.origem_id&&r.origem_bruta)c+=`<p class="note">A origem “${esc(r.origem_bruta)}” não casou com nenhuma origem cadastrada. Escolha uma acima ou deixe sem origem.</p>`;
+    c+=`<div class="wact"><button class="btn danger" data-preact="descartar">Descartar</button><button class="btn pri" data-preact="aprovar">Aprovar e lançar</button></div>`;
+  }else if(r.status==='pendente')c+='<p class="note">Somente leitura: só editores aprovam ou descartam.</p>';
+  el.innerHTML=`<div class="wbox" role="dialog" aria-modal="true" aria-label="Pré-cadastro"><div class="whead"><div><b>Pré-cadastro</b><small>${esc(r.nome)}</small></div><button class="wx" data-preact="fechar" aria-label="Fechar">×</button></div>${c}</div>`;
+  const f=el.querySelector('.btn.pri,.wx');if(f)f.focus();
+}
+async function preDecidir(a){
+  const r=PRE.itens.find(x=>x.id===PRE.sel);if(!r||PRE.ocupado||!S.canWrite||r.status!=='pendente')return;
+  const tipo=($('#pre-tipo')||{}).value,orig=($('#pre-orig')||{}).value,vend=($('#pre-vend')||{}).value;
+  if(a==='descartar'&&!confirm('Descartar este pré-cadastro? Ele não será lançado.'))return;
+  if(a==='aprovar'&&!tipo){toast('Não há tipo ativo para lançar.');return;}
+  PRE.ocupado=true;
+  try{
+    const novo=a==='aprovar'?'aprovado':'descartado';
+    // Marca no banco só se ainda estiver pendente: evita lançar duas vezes se outro editor decidir ao mesmo tempo.
+    const ok=PRE.demo?true:await S.db.pre.decidir(r.id,novo,A.sessao.user.id);
+    if(!ok){toast('Outra pessoa já decidiu este pré-cadastro. Atualizando…',4500);PRE.estado='idle';preFechar();render();return;}
+    r.status=novo;
+    if(a==='aprovar'){
+      if(PRE.demo)toast('Simulação: aprovado, nada foi lançado.');
+      else{const d=new Date(r.recebido_em),k=keyOf(d.getFullYear(),d.getMonth()+1);aplicarLanc(k,d.getDate(),tipo,orig,vend);clearTimeout(S.timers[k]);salvar(k);toast('Pré-cadastro aprovado e lançado');}
+    }else toast(PRE.demo?'Simulação: descartado.':'Pré-cadastro descartado');
+    preFechar();render();
+  }catch(err){toast(err&&err.code==='invalid_argument'?'Seu acesso não permite alterar.':'Não foi possível salvar agora. Tente de novo.',4500);}
+  finally{PRE.ocupado=false;}
+}
+document.addEventListener('click',e=>{
+  const t=e.target;
+  if(PRE.sel&&t===$('#wiz')){preFechar();return;}
+  const f=t.closest('[data-prefil]');if(f){PRE.filtro=f.dataset.prefil;render();return;}
+  const row=t.closest('[data-pre]');if(row){preAbrir(row.dataset.pre);return;}
+  const b=t.closest('[data-preact]');if(!b)return;
+  const a=b.dataset.preact;
+  if(a==='fechar')preFechar();
+  else if(a==='atualizar'){if(PRE.demo){toast('Demonstração: nada para atualizar.');return;}PRE.estado='idle';render();}
+  else preDecidir(a);
+});
+document.addEventListener('keydown',e=>{
+  if(PRE.sel&&e.key==='Escape')preFechar();
+  if(e.key==='Enter'&&e.target.matches&&e.target.matches('tr[data-pre]'))preAbrir(e.target.dataset.pre);
+});
 // ===== configurações =====
 function renderConfig(m){
   const ro=S.canWrite?'':'disabled';
@@ -1142,7 +1263,7 @@ document.addEventListener('change',async e=>{
 document.addEventListener('click',async e=>{if(e.target.closest('#btn-sair')&&sb){await sb.auth.signOut();location.reload();}});
 function conectarDados(){
   const timer=setTimeout(()=>{if(!S.ready){S.falha='Os dados demoraram demais para carregar.';render();}},15000);
-  const db=criarDb(sb);S.db=db;
+  const db=criarDb(sb);db.pre=criarPre(sb);S.db=db;
   let okCfg=false,okMes=false;
   const pronto=()=>{if(okCfg&&okMes&&!S.ready){S.ready=true;S.falha=null;clearTimeout(timer);render();}};
   db.doc('config/geral').onSnapshot(s=>{
