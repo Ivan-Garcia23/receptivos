@@ -17,8 +17,15 @@ function obrigatoria(k: string) {
   return v;
 }
 
-Deno.serve(async () => {
-  const res = { lidos: 0, remetente_nao_autorizado: 0, nao_reconhecidos: 0, novos: 0, ja_existiam: 0 };
+Deno.serve(async (req) => {
+  // Exige o segredo no cabeçalho (a chave anon do app é pública e passaria na verificação de JWT).
+  const segredo = env('LER_EMAILS_SEGREDO');
+  if (!segredo || req.headers.get('x-ler-emails-segredo') !== segredo) {
+    return Response.json({ erro: 'Não autorizado' }, { status: 401 });
+  }
+  // ?simular=1 lê e analisa, mas NÃO grava nada no banco.
+  const simular = new URL(req.url).searchParams.get('simular') === '1';
+  const res = { simulacao: simular, lidos: 0, remetente_nao_autorizado: 0, nao_reconhecidos: 0, novos: 0, novos_simulados: 0, ja_existiam: 0 };
   try {
     const supaUrl = obrigatoria('SUPABASE_URL');
     if (supaUrl.includes(PROJETO_PRODUCAO) && env('AMBIENTE') !== 'producao') {
@@ -67,6 +74,7 @@ Deno.serve(async () => {
       const aviso = extrairAviso({ assunto: p.subject ?? '', texto: p.text ?? '', html: typeof p.html === 'string' ? p.html : '' });
       if (!aviso) { res.nao_reconhecidos++; continue; }
       const messageId = p.messageId ?? `uid:${b.uid}:${await sha256Hex(new TextDecoder().decode(b.source).slice(0, 2000))}`;
+      if (simular) { res.novos_simulados++; continue; }
       const { data, error } = await sb.from('pre_cadastros').upsert({
         caixa,
         message_id: messageId,
