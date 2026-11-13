@@ -245,6 +245,9 @@ body.pipbody{padding:10px}
 .prerow:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .tabn{display:inline-block;min-width:18px;margin-left:6px;padding:0 6px;border-radius:9px;background:var(--meta);color:var(--accent-ink);font-size:12px;line-height:18px;text-align:center}
 .tabn:empty{display:none}
+.avisopre{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:40;max-width:min(360px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--accent);border-radius:14px;padding:14px 16px;box-shadow:0 12px 32px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:10px}
+.avisopre[hidden]{display:none}
+.avact{display:flex;gap:8px;justify-content:flex-end}
 .wtag{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:color-mix(in srgb,var(--meta) 22%,transparent);color:var(--meta)}
 .metacfg{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;padding:12px 18px}
 .metacfg h2{margin:0}
@@ -414,6 +417,7 @@ function render(){
   else if(S.view==='lancar')renderLancar(m);
   else if(S.view==='pre')renderPre(m);
   else renderConfig(m);
+  if(S.ready)preAssinar();
   updPreBadge();updStatus();
 }
 function updStatus(){
@@ -858,7 +862,7 @@ async function salvarCfg(){
 // ===== pré-cadastros (avisos de e-mail) =====
 // Dados vêm da tabela public.pre_cadastros (preenchida pela função ler-emails). Aprovar lança via aplicarLanc.
 // Modo demonstração: abrir com #pre-demo (dados fictícios em memória, nada é gravado nem lançado).
-const PRE={estado:'idle',itens:[],filtro:'pendente',sel:null,demo:false,ocupado:false,erro:''};
+const PRE={estado:'idle',itens:[],filtro:'pendente',sel:null,demo:false,ocupado:false,erro:'',assinado:false};
 const PRE_FONTE={'rd-station':'RD Station','site-criasoft':'Site Criasoft','lp-synlua':'LP Synlua'};
 const PRE_SIT={pendente:['none','Pendente'],aprovado:['ok','Aprovado'],descartado:['bad','Descartado']};
 (function(){if(location.hash==='#pre-demo'){PRE.demo=true;S.view='pre';}})();
@@ -866,6 +870,8 @@ function criarPre(sb){
   const erro=error=>{const e=new Error(error.message);e.code=(error.code==='42501'||/row-level security/i.test(error.message||''))?'invalid_argument':(error.code||'erro');return e;};
   return {
     async listar(){const {data,error}=await sb.from('pre_cadastros').select('id,fonte,recebido_em,nome,empresa,cidade,origem_bruta,origem_id,lead_hash,status').order('recebido_em',{ascending:false}).limit(500);if(error)throw erro(error);return data||[];},
+    // Tempo real: chega cada pré-cadastro novo (INSERT) e cada decisão de outro usuário (UPDATE). Respeita a RLS.
+    observar(cb){const ch=sb.channel('pre-cadastros').on('postgres_changes',{event:'*',schema:'public',table:'pre_cadastros'},pl=>cb(pl)).subscribe();return ()=>sb.removeChannel(ch);},
     async decidir(id,status,uid){const {data,error}=await sb.from('pre_cadastros').update({status,decidido_por:uid,decidido_em:new Date().toISOString()}).eq('id',id).eq('status','pendente').select('id');if(error)throw erro(error);return (data||[]).length>0;}
   };
 }
@@ -889,6 +895,42 @@ function preAnexar(itens){
   const g={};itens.forEach(r=>{r._outros=0;r._dup=false;if(!r.lead_hash)return;const k=r.lead_hash+'|'+preDia(r);(g[k]=g[k]||[]).push(r);});
   Object.values(g).forEach(l=>{if(l.length<2)return;l.sort((a,b)=>new Date(a.recebido_em)-new Date(b.recebido_em));l.forEach((r,i)=>{r._outros=l.length-1;r._dup=i>0;});});
 }
+// ----- aviso de e-mail novo (aparece em qualquer aba do app) -----
+const TITULO_APP=document.title;
+const AVISO={n:0,nome:'',t:null};
+function preAssinar(){
+  if(PRE.assinado||PRE.demo||!(S.db&&S.db.pre))return;
+  PRE.assinado=true;
+  carregarPre();            // já deixa o contador da aba correto
+  S.db.pre.observar(preEvento);
+}
+function preEvento(pl){
+  const r=pl.new;if(!r||!r.id)return;
+  if(pl.eventType==='INSERT'){
+    if(PRE.estado==='ok'&&!PRE.itens.some(x=>x.id===r.id))PRE.itens.unshift(r);
+    AVISO.n++;if(!AVISO.nome)AVISO.nome=r.nome||'';
+    clearTimeout(AVISO.t);AVISO.t=setTimeout(mostrarAviso,1500); // junta vários e-mails que chegam juntos
+  }else if(pl.eventType==='UPDATE'){
+    const it=PRE.itens.find(x=>x.id===r.id);if(it)Object.assign(it,{status:r.status,decidido_em:r.decidido_em});
+  }
+  if(S.view==='pre')render();else updPreBadge();
+}
+function mostrarAviso(){
+  if(!AVISO.n)return;
+  let el=$('#aviso-pre');
+  if(!el){el=document.createElement('div');el.id='aviso-pre';el.className='avisopre';el.setAttribute('role','alert');document.body.appendChild(el);}
+  const txt=AVISO.n===1?`Novo pré-cadastro por e-mail: <b>${esc(AVISO.nome||'sem nome')}</b>`:`<b>${AVISO.n} novos pré-cadastros</b> chegaram por e-mail`;
+  el.innerHTML=`<div>${txt}</div><div class="avact"><button class="btn sm pri" data-aviso="ver">Ver</button><button class="btn sm" data-aviso="fechar">Fechar</button></div>`;
+  el.hidden=false;
+  if(document.hidden)document.title='('+AVISO.n+') '+TITULO_APP;
+}
+function fecharAvisoPre(){AVISO.n=0;AVISO.nome='';const el=$('#aviso-pre');if(el)el.hidden=true;document.title=TITULO_APP;}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)document.title=TITULO_APP;});
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-aviso]');if(!b)return;
+  const ver=b.dataset.aviso==='ver';fecharAvisoPre();
+  if(ver){S.view='pre';PRE.filtro='pendente';history.replaceState(null,'','#pre');render();window.scrollTo(0,0);}
+});
 function updPreBadge(){const nb=$('#pre-n');if(nb)nb.textContent=PRE.estado==='ok'?(PRE.itens.filter(r=>r.status==='pendente').length||''):'';}
 async function carregarPre(){
   if(PRE.demo){PRE.itens=preDemoDados();PRE.estado='ok';return;}
