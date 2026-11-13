@@ -15,7 +15,7 @@ create table public.pre_cadastros (
   origem_id     text,                          -- origem do app, se casou por nome/alias
   lead_hash     text,                          -- sha-256 do e-mail do lead (marca duplicados)
   status        text not null default 'pendente',
-  decidido_por  uuid references auth.users(id),
+  decidido_por  uuid references auth.users(id) on delete set null,  -- remover um usuário não pode ser bloqueado por isto
   decidido_em   timestamptz,
   criado_em     timestamptz not null default now(),
   constraint pre_cadastros_status_check check (status in ('pendente','aprovado','descartado')),
@@ -23,7 +23,6 @@ create table public.pre_cadastros (
 );
 
 create index pre_cadastros_status_idx on public.pre_cadastros (status, recebido_em desc);
-create index pre_cadastros_lead_idx   on public.pre_cadastros (lead_hash, recebido_em);
 
 alter table public.pre_cadastros enable row level security;
 
@@ -34,7 +33,11 @@ create policy pre_cadastros_alterar on public.pre_cadastros for update to authen
   using (((select private.papel()) = 'editor'::text))
   with check (((select private.papel()) = 'editor'::text));
 
--- Privilégios mínimos (sem insert, delete nem truncate para usuários).
+-- Privilégios mínimos: sem insert, delete nem truncate para usuários, e o editor só consegue
+-- alterar as colunas da decisão (não o nome, a data nem o e-mail de origem).
 revoke all on public.pre_cadastros from anon, authenticated;
-grant select, update on public.pre_cadastros to authenticated;
+grant select on public.pre_cadastros to authenticated;
+grant update (status, decidido_por, decidido_em) on public.pre_cadastros to authenticated;
 grant all on public.pre_cadastros to service_role;
+
+-- Reversão (a tabela é nova; se precisar desfazer): drop table public.pre_cadastros;
