@@ -1,5 +1,6 @@
 -- Pré-cadastros vindos dos avisos de e-mail (RD Station, site Criasoft, LP Synlua).
--- NÃO APLICADO. Aplicar só com autorização específica do dono, primeiro no projeto de desenvolvimento.
+-- JÁ EXISTE em produção (criada pelo dono; o erro 42P07 ao rodar de novo confirmou). Estrutura conferida
+-- e ajustada por 20261114_pre_cadastros_ajuste.sql. Este arquivo documenta o esquema; não rodar de novo.
 -- Não guarda e-mail nem telefone do lead (LGPD): só um hash do e-mail, para marcar duplicados.
 
 create table public.pre_cadastros (
