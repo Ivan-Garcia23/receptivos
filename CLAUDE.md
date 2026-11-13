@@ -14,12 +14,20 @@ App web de controle de receptivos comerciais: lançamento diário por tipo, vend
 
 ## Regras obrigatórias
 1. Nunca alterar o Supabase de produção (SQL, migrações, políticas, convites) sem pedido explícito do dono. Mudança de banco = arquivo SQL novo em `supabase/migrations/` (criar a pasta na primeira vez) e aplicação só após aprovação.
-2. Nunca fazer deploy, `git push` nem mexer na Vercel sem pedido explícito.
+2. Publicar (`git push`, deploy) só pelo "Fluxo de publicação" abaixo, depois do "sim" do dono. Nunca usar `--force`. Nunca mexer em configurações da Vercel sem pedido explícito.
 3. Nunca gravar segredos no repositório. A chave `sb_publishable_...` em `index.html` é pública por desenho; qualquer outra chave (`service_role`, senhas, tokens) nunca entra em arquivo.
 4. O app local aponta para o banco de PRODUÇÃO por padrão (`SB_URL` e `SB_KEY` em `index.html`). Para testar, use um projeto Supabase de desenvolvimento e troque essas duas constantes só localmente, sem commitar.
 5. Não mexer no projeto `performance-hub` (Vercel, Supabase ou GitHub). São projetos separados.
 6. Manter arquivo único e sem build, a menos que o dono peça outra arquitetura.
 7. Textos da interface em pt-BR, com acentos. Datas no formato brasileiro.
+
+## Fluxo de publicação (igual ao performance-hub)
+1. Dono pede a alteração → desenvolver e validar localmente (`node --check` no `<script>`), numa branch (não na `main`).
+2. Apresentar resumo curto e perguntar "posso publicar?".
+3. Resposta "sim" = autorização explícita para concluir o ciclo daquela alteração, sem pedir de novo a cada etapa: commit → push da branch → merge `--ff-only` na `main` → `git push origin main`. Antes: `git pull`.
+4. A Vercel publica sozinha. Aguardar o deploy e confirmar que ficou READY (1 checagem do deploy e 1 do site); informar o commit publicado.
+5. Alteração no Supabase de produção exige autorização específica, nunca coberta pelo "sim" do ciclo. Não modificar o `performance-hub`.
+6. Se houver erro ou bloqueio de permissão: parar, informar exatamente qual ação foi negada e qual configuração precisa ser ajustada. Não contornar. Não liberar pushes de forma permanente em `settings.local.json` sem pedido do dono; usar o fluxo normal de permissões do Claude Code.
 
 ## Regras de código
 - Acesso a dados só pela camada `criarDb(sb)` (imita `doc().set/onSnapshot` e `collection().onSnapshot`). Não espalhar chamadas `sb.from(...)` pelo código, exceto na tela Usuários.
