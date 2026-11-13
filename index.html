@@ -1263,7 +1263,7 @@ document.addEventListener('submit',async e=>{
       if(error)throw error;
       A.ocupado=false;
       if(data.session){await aposLogin(data.session);return;}
-      A.modo='entrar';A.msg='Conta criada. Enviamos um e-mail de confirmação para '+email+'. Clique no link e depois entre aqui.';render();return;
+      A.modo='entrar';A.msg='Conta criada. Enviamos um e-mail de confirmação para '+email+'. Clique no link e depois entre aqui. Se o link abrir uma página com erro, o e-mail pode já estar confirmado: volte para este endereço e entre com e-mail e senha.';render();return;
     }
     const {data,error}=await sb.auth.signInWithPassword({email,password:senha});
     if(error)throw error;
@@ -1333,8 +1333,18 @@ function conectarDados(){
     okMes=true;if(S.ready)aoMudarRemoto();else pronto();
   },e=>{clearTimeout(timer);S.falha='Erro ao ler os lançamentos ('+(e&&e.message||'desconhecido')+').';render();});
 }
+// O Supabase devolve erros do link do e-mail no endereço: #error=access_denied&error_code=otp_expired&...
+function erroDoLink(h){
+  const p=new URLSearchParams(String(h||'').replace(/^#/,''));const cod=p.get('error_code')||'',err=p.get('error')||'';
+  if(!err&&!cod)return null;
+  return /otp_expired|expired|invalid/i.test(cod+' '+(p.get('error_description')||''))
+    ?'Este link de confirmação já foi usado ou expirou. Se você já confirmou o e-mail, entre com seu e-mail e senha.'
+    :'Não foi possível confirmar o e-mail. Tente entrar; se não der, peça um novo link criando a conta de novo.';
+}
 (async function iniciar(){
   render();
+  const msgLink=erroDoLink(location.hash);
+  if(msgLink){A.modo='entrar';A.msg=msgLink;A.erro=true;history.replaceState(null,'',location.pathname+location.search);}
   if(!window.supabase||!window.supabase.createClient){S.falha='Não foi possível carregar a biblioteca do banco de dados. Verifique a internet e recarregue.';render();return;}
   sb=window.supabase.createClient(SB_URL,SB_KEY);
   const {data}=await sb.auth.getSession();
