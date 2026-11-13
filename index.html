@@ -645,7 +645,7 @@ function renderLancarDia(m){
 }
 // ===== TESTE: lançamento guiado (início) =====
 const W={on:false,step:1,tipo:null,orig:null,vend:null,k:null,d:null};
-function guiadoBtn(){return '<button class="btn" data-act="flutuante" title="Lançar numa janela pequena que fica por cima das outras">⧉ Janela flutuante</button><button class="btn" data-act="guiado">+ Lançar receptivo <span class="wtag">teste</span></button>';}
+function guiadoBtn(){return '<button class="btn" data-act="flutuante" title="Lançar numa janela pequena que fica por cima das outras">⧉ Janela flutuante</button><button class="btn" data-act="guiado">+ Lançar receptivo</button>';}
 function abrirGuiado(){
   if(S.view==='lancar'&&S.lancModo==='dia'){W.k=S.mes;W.d=S.diaN;}else{W.k=keyOf(hoje.getFullYear(),hoje.getMonth()+1);W.d=hoje.getDate();}
   Object.assign(W,{on:true,step:1,tipo:null,orig:null,vend:null});renderGuiado();
@@ -661,7 +661,7 @@ function renderGuiado(){
   else if(W.step===2)corpo='<h3>De onde ele veio?</h3>'+opts('origens','orig',W.orig,`<button class="wopt ghost ${W.orig==='-'?'on':''}" data-w="orig|-">Não informar</button>`);
   else if(W.step===3)corpo='<h3>Para qual vendedor foi passado?</h3>'+opts('vendedores','vend',W.vend,`<button class="wopt semv ${W.vend==='-'?'on':''}" data-w="vend|-">Sem vendedor (atribuir depois)</button>`);
   else corpo=`<h3>Confira e lance</h3><dl class="wsum"><dt>Dia</dt><dd>${esc(data)}</dd><dt>Tipo</dt><dd>${esc(nomeDe('tipos',W.tipo))}</dd><dt>Origem</dt><dd>${W.orig==='-'?'Não informada':esc(nomeDe('origens',W.orig))}</dd><dt>Vendedor</dt><dd>${W.vend==='-'?'Ainda sem vendedor':esc(nomeDe('vendedores',W.vend))}</dd></dl><div class="wact"><button class="btn" data-wact="outro">Lançar e começar outro</button><button class="btn pri" data-wact="ok">Lançar</button></div>`;
-  el.innerHTML=`<div class="wbox" role="dialog" aria-modal="true" aria-label="Lançar receptivo"><div class="whead"><div><b>Lançar receptivo <span class="wtag">teste</span></b><small>${esc(data)}</small></div><button class="wx" data-wact="fechar" aria-label="Fechar">×</button></div><ol class="wsteps">${passos.map((p,i)=>`<li class="${i+1===W.step?'on':i+1<W.step?'done':''}">${p}</li>`).join('')}</ol>${corpo}${W.step>1?'<button class="wback" data-wact="voltar">‹ Voltar</button>':''}</div>`;
+  el.innerHTML=`<div class="wbox" role="dialog" aria-modal="true" aria-label="Lançar receptivo"><div class="whead"><div><b>Lançar receptivo</b><small>${esc(data)}</small></div><button class="wx" data-wact="fechar" aria-label="Fechar">×</button></div><ol class="wsteps">${passos.map((p,i)=>`<li class="${i+1===W.step?'on':i+1<W.step?'done':''}">${p}</li>`).join('')}</ol>${corpo}${W.step>1?'<button class="wback" data-wact="voltar">‹ Voltar</button>':''}</div>`;
   const f=el.querySelector('.wopt.on,.wopt,.btn.pri');if(f)f.focus();
 }
 function aplicarGuiado(){aplicarLanc(W.k,W.d,W.tipo,W.orig,W.vend);}
