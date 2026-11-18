@@ -375,20 +375,22 @@ const S={db:null,user:null,canWrite:true,cfg:null,meses:{},ready:false,falha:nul
 function calcMes(k){
   const doc=S.meses[k]||{};const nd=diasNoMes(k);const dias=doc.dias||{};
   const tipos={},vend={},orig={},porDia=[];let total=0,dist=0;
+  const fora0=!!doc.eventosForaDaMeta; // com a opção marcada, Eventos não entram na base nem no "sem vendedor"
   for(let d=1;d<=nd;d++){
     const r=dias[d]||{};const t=r.t||{},v=r.v||{},o=r.o||{};
     let td=0,vd=0;
     for(const [id,n] of Object.entries(t)){tipos[id]=(tipos[id]||0)+n;td+=n;}
     for(const [id,n] of Object.entries(v)){vend[id]=(vend[id]||0)+n;vd+=n;}
     for(const [id,n] of Object.entries(o)){orig[id]=(orig[id]||0)+n;}
-    porDia.push({d,t,total:td,dist:vd});total+=td;dist+=vd;
+    const bd=fora0?td-(t.eventos||0):td;
+    porDia.push({d,t,total:td,base:bd,sem:bd-vd,dist:vd});total+=td;dist+=vd;
   }
   for(const [id,n] of Object.entries(doc.origensMes||{})){if(n>0)orig[id]=(orig[id]||0)+n;}
   const ev=tipos.eventos||0;const fora=!!doc.eventosForaDaMeta;
   const base=fora?total-ev:total;
   const alc=base>0?dist/base:null;
   const totOrig=Object.values(orig).reduce((a,b)=>a+b,0);
-  return {k,tipos,vend,orig,porDia,total,dist,base,alc,fora,ev,totOrig,comp:doc.comparativo>0?doc.comparativo:null};
+  return {k,tipos,vend,orig,porDia,total,dist,base,sem:base-dist,alc,fora,ev,totOrig,comp:doc.comparativo>0?doc.comparativo:null};
 }
 function calcAno(y){
   const meses=[];for(let m=1;m<=12;m++)meses.push(calcMes(keyOf(y,m)));
@@ -452,7 +454,7 @@ function kpiBlock(c,compLabel){
   if(c.comp){const v=c.total/c.comp-1;h+=`<small class="${v>=0?'up':'down'}">${v>=0?'+':''}${pct(v)} vs ${esc(compLabel)} (${fmt(c.comp)})</small>`;}
   else h+=`<small>sem comparativo</small>`;
   h+='</div>';
-  h+=`<div class="kpi"><span>Distribuídos</span><b>${fmt(c.dist)}</b><small>${c.total-c.dist>0?fmt(c.total-c.dist)+' sem vendedor':'todos com vendedor'}</small></div>`;
+  h+=`<div class="kpi"><span>Distribuídos</span><b>${fmt(c.dist)}</b><small>${c.sem>0?fmt(c.sem)+' sem vendedor':'todos com vendedor'}</small></div>`;
   tipos.forEach((t,i)=>{const v=c.tipos[t.id]||0;h+=`<div class="kpi"><span><i class="dot" style="background:${corIdx(i)}"></i>${esc(t.nome)}</span><b>${fmt(v)}</b><small>${c.total?pct(v/c.total)+' do total':'&nbsp;'}</small></div>`;});
   return h+'</div>';
 }
@@ -599,7 +601,7 @@ function renderLancar(m){
   const nd=diasNoMes(k);const hk=keyOf(hoje.getFullYear(),hoje.getMonth()+1);
   for(let d=1;d<=nd;d++){
     const r=(doc.dias||{})[d]||{};const wd=new Date(y,mm-1,d).getDay();
-    const pd=c.porDia[d-1];const sem=pd.total-pd.dist;
+    const pd=c.porDia[d-1];const sem=pd.sem;
     h+=`<tr class="${wd===0||wd===6?'we':''} ${hk===k&&hoje.getDate()===d?'today':''}" data-d="${d}"><td class="day">${d}<small>${DSEM[wd]}</small></td>`;
     h+=tipos.map(t=>cell(d,'t',t.id,(r.t||{})[t.id],ro)).join('');
     h+=`<td class="calc" data-calc="tot">${pd.total||''}</td>`;
@@ -608,7 +610,7 @@ function renderLancar(m){
     if(show)h+=ors.map((o,i)=>cell(d,'o',o.id,(r.o||{})[o.id],ro,i===0)).join('');
     h+='</tr>';
   }
-  h+='</tbody><tfoot><tr><td class="day">Total</td>'+tipos.map(t=>`<td data-ft="t:${t.id}">${fmt(c.tipos[t.id]||0)}</td>`).join('')+`<td data-ft="tot">${fmt(c.total)}</td>`+vend.map((v,i)=>`<td class="${i===0?'sep':''}" data-ft="v:${v.id}">${fmt(c.vend[v.id]||0)}</td>`).join('')+`<td data-ft="sem">${fmt(c.total-c.dist)}</td>`;
+  h+='</tbody><tfoot><tr><td class="day">Total</td>'+tipos.map(t=>`<td data-ft="t:${t.id}">${fmt(c.tipos[t.id]||0)}</td>`).join('')+`<td data-ft="tot">${fmt(c.total)}</td>`+vend.map((v,i)=>`<td class="${i===0?'sep':''}" data-ft="v:${v.id}">${fmt(c.vend[v.id]||0)}</td>`).join('')+`<td data-ft="sem">${fmt(c.sem)}</td>`;
   if(show)h+=ors.map((o,i)=>`<td class="${i===0?'sep':''}" data-ft="od:${o.id}">${fmt(diaOrig(doc,o.id))}</td>`).join('');
   h+='</tr></tfoot></table></div>';
   h+='<p class="note">Digite os números e eles são salvos sozinhos. Enter desce para o dia seguinte; Tab vai para a próxima coluna. “Sem vendedor” em vermelho indica mais distribuições do que receptivos no dia.</p>';
@@ -624,7 +626,7 @@ function renderLancar(m){
 function segLanc(){return `<div class="seg" role="group" aria-label="Forma de lançamento"><button data-lmodo="dia" aria-pressed="${S.lancModo==='dia'}">Dia</button><button data-lmodo="mes" aria-pressed="${S.lancModo==='mes'}">Mês inteiro</button></div>`;}
 function irHoje(){S.mes=keyOf(hoje.getFullYear(),hoje.getMonth()+1);S.diaN=hoje.getDate();}
 function moverDia(n){const {y,m}=partsOf(S.mes);const dt=new Date(y,m-1,S.diaN+n);S.mes=keyOf(dt.getFullYear(),dt.getMonth()+1);S.diaN=dt.getDate();}
-function diaSumHtml(){const c=calcMes(S.mes);const pd=c.porDia[S.diaN-1]||{total:0,dist:0};const sem=pd.total-pd.dist;
+function diaSumHtml(){const c=calcMes(S.mes);const pd=c.porDia[S.diaN-1]||{total:0,dist:0,sem:0};const sem=pd.sem;
   return `<div class="kpi"><span>Total do dia</span><b>${fmt(pd.total)}</b></div><div class="kpi"><span>Distribuídos no dia</span><b>${fmt(pd.dist)}</b></div><div class="kpi"><span>Sem vendedor</span><b style="color:${sem<0?'var(--bad)':sem>0?'var(--meta)':'inherit'}">${fmt(sem)}</b><small>${sem<0?'mais distribuições do que receptivos':sem>0?'ainda falta distribuir':'tudo distribuído'}</small></div><div class="kpi"><span>Alcançado no mês</span><b style="color:${c.alc==null?'inherit':c.alc>=S.cfg.meta?'var(--ok)':'var(--bad)'}">${pct(c.alc)}</b><small>${fmt(c.dist)} de ${fmt(c.base)}; meta ${pct(S.cfg.meta,0)}</small></div>`;}
 function atualizarDiaCalc(){const el=$('#dia-sum');if(el)el.innerHTML=diaSumHtml();updSemV();updPend();}
 function blocoSteps(tit,sub,g,lista,vals,d,ro){
@@ -697,17 +699,17 @@ document.addEventListener('click',e=>{
 document.addEventListener('keydown',e=>{if(W.on&&e.key==='Escape')fecharGuiado();});
 // ===== TESTE: lançamento guiado (fim) =====
 // ===== Sem vendedor: sinalização e atribuição =====
-function pendentes(k){return calcMes(k).porDia.filter(d=>d.total-d.dist>0).map(d=>({d:d.d,n:d.total-d.dist}));}
+function pendentes(k){return calcMes(k).porDia.filter(d=>d.sem>0).map(d=>({d:d.d,n:d.sem}));}
 function pendBtn(){if(S.view==='painel'&&S.modo==='ano')return '';const n=pendentes(S.mes).reduce((a,x)=>a+x.n,0);if(!n)return '';return `<button class="btn pend" data-act="pend" title="Receptivos ainda sem vendedor neste mês">${fmt(n)} sem vendedor</button>`;}
 function pendSlot(){return `<span id="pend-slot" style="display:contents">${pendBtn()}</span>`;}
 function updPend(){const s=$('#pend-slot');if(s)s.innerHTML=pendBtn();updMini();}
-function semVendInner(){const c=calcMes(S.mes);const pd=c.porDia[S.diaN-1]||{total:0,dist:0};const sem=pd.total-pd.dist;
+function semVendInner(){const c=calcMes(S.mes);const pd=c.porDia[S.diaN-1]||{total:0,dist:0,sem:0};const sem=pd.sem;
   return `<span class="lab"><i class="dot" style="background:var(--meta)"></i>Sem vendedor</span><span class="semv-r">${sem>0&&S.canWrite?'<button class="btn sm" data-act="pend-dia">Atribuir</button>':''}<b class="${sem>0?'warnc':sem<0?'badc':''}">${sem}</b></span>`;}
-function updSemV(){const el=$('#dia-semv');if(!el)return;el.innerHTML=semVendInner();const c=calcMes(S.mes);const pd=c.porDia[S.diaN-1]||{total:0,dist:0};el.classList.toggle('zero',pd.total-pd.dist===0);}
+function updSemV(){const el=$('#dia-semv');if(!el)return;el.innerHTML=semVendInner();const c=calcMes(S.mes);const pd=c.porDia[S.diaN-1]||{total:0,dist:0,sem:0};el.classList.toggle('zero',pd.sem===0);}
 const P={on:false,k:null,soDia:null};
 function abrirPend(k,dia){P.on=true;P.k=k;P.soDia=dia||null;renderPend();}
 function fecharPend(){P.on=false;const el=$('#wiz');el.innerHTML='';el.hidden=true;}
-function pendDoDia(k,d,sem){const doc=S.meses[k]||{};const itens=(Array.isArray(doc.pend)?doc.pend:[]).filter(p=>p.d===d);return itens.slice(0,Math.max(0,sem));}
+function pendDoDia(k,d,sem){const doc=S.meses[k]||{};const itens=(Array.isArray(doc.pend)?doc.pend:[]).filter(p=>p.d===d&&!(doc.eventosForaDaMeta&&p.t==='eventos'));return itens.slice(0,Math.max(0,sem));}
 function pendCorpo(k,soDia){
   let lista=pendentes(k);if(soDia)lista=lista.filter(x=>x.d===soDia);
   const {y,m}=partsOf(k);const vend=(S.cfg.vendedores||[]).filter(v=>v.ativo);
@@ -826,10 +828,10 @@ function difOrigTxt(c){if(!c.totOrig)return '';const d=c.totOrig-c.total;return 
 function cell(d,g,id,v,ro,sep){return `<td class="${sep?'sep':''}"><input type="number" min="0" inputmode="numeric" aria-label="Dia ${d} ${esc(id)}" data-d="${d}" data-g="${g}" data-id="${esc(id)}" value="${v>0?v:''}" ${ro}></td>`;}
 function atualizarGradeCalc(){updPend();
   const k=S.mes;const c=calcMes(k);const doc=S.meses[k]||{};
-  document.querySelectorAll('#grade tbody tr').forEach(tr=>{const d=+tr.dataset.d;const pd=c.porDia[d-1];const sem=pd.total-pd.dist;
+  document.querySelectorAll('#grade tbody tr').forEach(tr=>{const d=+tr.dataset.d;const pd=c.porDia[d-1];const sem=pd.sem;
     tr.querySelector('[data-calc=tot]').textContent=pd.total||'';const s=tr.querySelector('[data-calc=sem]');s.textContent=sem?sem:'';s.classList.toggle('warn',sem<0);});
   document.querySelectorAll('#grade tfoot [data-ft]').forEach(td=>{const f=td.dataset.ft;let v;
-    if(f==='tot')v=c.total;else if(f==='sem')v=c.total-c.dist;else{const [g,id]=f.split(':');v=g==='t'?c.tipos[id]:g==='v'?c.vend[id]:diaOrig(doc,id);}td.textContent=fmt(v||0);});
+    if(f==='tot')v=c.total;else if(f==='sem')v=c.sem;else{const [g,id]=f.split(':');v=g==='t'?c.tipos[id]:g==='v'?c.vend[id]:diaOrig(doc,id);}td.textContent=fmt(v||0);});
   document.querySelectorAll('[data-od]').forEach(td=>{const v=diaOrig(doc,td.dataset.od);td.textContent=v?fmt(v):'—';});
   document.querySelectorAll('[data-ot]').forEach(td=>{td.innerHTML='<b>'+fmt(c.orig[td.dataset.ot]||0)+'</b>';});
   const ot=$('#ot-tot');if(ot)ot.textContent=fmt(c.totOrig);const od=$('#ot-dif');if(od)od.textContent=difOrigTxt(c);
@@ -1139,8 +1141,8 @@ async function exportar(){
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ori),'Origens '+y);
   a.meses.forEach((c,i)=>{const k=keyOf(y,i+1);const doc=S.meses[k]||{};
     const rows=[['Dia',...tipos.map(t=>t.nome),'Total no dia',...vend.map(v=>v.nome),'Sem vendedor']];
-    c.porDia.forEach(d=>{const r=(doc.dias||{})[d.d]||{};rows.push([d.d,...tipos.map(t=>(r.t||{})[t.id]||''),d.total,...vend.map(v=>(r.v||{})[v.id]||''),d.total-d.dist||'']);});
-    rows.push(['Total',...tipos.map(t=>c.tipos[t.id]||0),c.total,...vend.map(v=>c.vend[v.id]||0),c.total-c.dist]);
+    c.porDia.forEach(d=>{const r=(doc.dias||{})[d.d]||{};rows.push([d.d,...tipos.map(t=>(r.t||{})[t.id]||''),d.total,...vend.map(v=>(r.v||{})[v.id]||''),d.sem||'']);});
+    rows.push(['Total',...tipos.map(t=>c.tipos[t.id]||0),c.total,...vend.map(v=>c.vend[v.id]||0),c.sem]);
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),MES_LABEL[i].toUpperCase()+' '+y);});
   const data=XLSX.write(wb,{bookType:'xlsx',type:'array'});
   const url=URL.createObjectURL(new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
