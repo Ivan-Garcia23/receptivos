@@ -1113,24 +1113,61 @@ function renderRel(m){
   h+='<p class="note">O total de origens pode ser maior que o total de leads: inclui Eventos e lançamentos mensais de origem.</p></div>';
   m.innerHTML=h;
 }
+// Excel no layout do modelo: título e "Mês" centralizados com borda, seções com borda,
+// cabeçalho e linhas alternadas em cinza, totais em negrito. Formato Excel XML 2003 (abre direto no Excel).
 function relExcel(){
-  if(!window.XLSX){toast('A biblioteca de Excel não carregou. Recarregue a página.',4000);return;}
+  if(!REL.campos.length){toast('Abra a aba Relatório antes de exportar.',3500);return;}
   const k=S.mes;const {y,m:mm}=partsOf(k);
   const titulo=relOv('titulo',`RELATÓRIO MENSAL - RECEPTIVOS ${MES_LABEL[mm-1].toUpperCase()} ${y}`);
-  const rows=[[titulo],['Mês',mesNome(k)]];const pctRows=[];let grupo=null;
+  const L=[{t:'titulo',texto:titulo},{t:'meta',a:'Mês',b:mesNome(k)},{t:'vazia'}];
+  let grupo=null,idx=0;
   REL.campos.filter(f=>f.grupo!=='Título').forEach(f=>{
-    if(f.grupo!==grupo){grupo=f.grupo;rows.push([]);rows.push([grupo.toUpperCase()]);rows.push(['Item','Valor']);}
+    if(f.grupo!==grupo){
+      if(grupo!==null)L.push({t:'vazia'});
+      grupo=f.grupo;idx=0;
+      L.push({t:'sec',texto:grupo.toUpperCase()});L.push({t:'hdr',a:'Item',b:'Valor'});
+    }
     const v=relNum(relOv(f.id,f.def));
-    if(v&&typeof v==='object'){pctRows.push(rows.length);rows.push([f.rotulo,Math.round(v.n*100000)/100000]);}
-    else rows.push([f.rotulo,v]);
+    let val=v,pc=false;
+    if(v&&typeof v==='object'){val=Math.round(v.n*100000)/100000;pc=true;}
+    const tot=/^(Total|Total de origens)$/.test(f.rotulo);
+    L.push({t:tot?'tot':'linha',a:f.rotulo,b:val,pc,cinza:!tot&&(idx++%2===1)});
   });
-  const ws=XLSX.utils.aoa_to_sheet(rows);
-  pctRows.forEach(r=>{const a=XLSX.utils.encode_cell({r,c:1});if(ws[a])ws[a].z='0.0%';});
-  ws['!cols']=[{wch:48},{wch:20}];
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Relatório '+MES_CURTO[mm-1]+' '+y);
-  const data=XLSX.write(wb,{bookType:'xlsx',type:'array'});
-  const url=URL.createObjectURL(new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-  const lk=document.createElement('a');lk.href=url;lk.download='relatorio-receptivos-'+y+'-'+String(mm).padStart(2,'0')+'.xlsx';document.body.appendChild(lk);lk.click();lk.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
+  // Estilos (um por combinação) e linhas em XML
+  const ST={};const esc2=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const st=(o)=>{const key=JSON.stringify(o);if(!ST[key])ST[key]={id:'s'+Object.keys(ST).length,o};return ST[key].id;};
+  const cel=(texto,o,merge)=>{const id=st(o);const num=typeof texto==='number';
+    return `<Cell ss:StyleID="${id}"${merge?' ss:MergeAcross="1"':''}><Data ss:Type="${num?'Number':'String'}">${num?texto:esc2(texto)}</Data></Cell>`;};
+  const CINZA='#D9D9D9';
+  const base={centro:true,negrito:false,fill:null,fmt:null};
+  const rows=L.map(r=>{
+    if(r.t==='vazia')return '';
+    if(r.t==='titulo')return `<Row ss:Height="22">${cel(r.texto,{...base,negrito:true},true)}</Row>`;
+    if(r.t==='meta')return `<Row>${cel(r.a,{...base,fill:CINZA})}${cel(r.b,{...base,fill:CINZA})}</Row>`;
+    if(r.t==='sec')return `<Row>${cel(r.texto,base,true)}</Row>`;
+    if(r.t==='hdr')return `<Row>${cel(r.a,{...base,fill:CINZA})}${cel(r.b,{...base,fill:CINZA})}</Row>`;
+    const fill=r.t==='tot'?CINZA:(r.cinza?CINZA:null);
+    const negrito=r.t==='tot';
+    const fmt=r.pc?'0.0%':null;
+    return `<Row>${cel(r.a,{...base,fill,negrito})}${cel(typeof r.b==='number'?r.b:String(r.b),{...base,fill,negrito,fmt})}</Row>`;
+  }).join('\n');
+  const borda=p=>`<Border ss:Position="${p}" ss:LineStyle="Continuous" ss:Weight="1"/>`;
+  const estilos=Object.values(ST).map(({id,o})=>
+    `<Style ss:ID="${id}"><Alignment ss:Horizontal="${o.centro?'Center':'Left'}" ss:Vertical="Center"/>`+
+    `<Borders>${borda('Top')}${borda('Bottom')}${borda('Left')}${borda('Right')}</Borders>`+
+    `<Font ss:FontName="Calibri" ss:Size="11" ss:Bold="${o.negrito?1:0}"/>`+
+    (o.fill?`<Interior ss:Color="${o.fill}" ss:Pattern="Solid"/>`:'')+
+    (o.fmt?`<NumberFormat ss:Format="${o.fmt}"/>`:'')+
+    `</Style>`).join('');
+  const xml=`<?xml version="1.0" encoding="UTF-8"?>\n<?mso-application progid="Excel.Sheet"?>\n`+
+    `<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">`+
+    `<Styles>${estilos}</Styles>`+
+    `<Worksheet ss:Name="Relatório ${esc2(MES_CURTO[mm-1]+' '+y)}"><Table ss:DefaultRowHeight="18">`+
+    `<Column ss:Width="240"/><Column ss:Width="150"/>${rows}</Table>`+
+    `<WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel"><Selected/><ProtectObjects>False</ProtectObjects><ProtectScenarios>False</ProtectScenarios></WorksheetOptions>`+
+    `</Worksheet></Workbook>`;
+  const url=URL.createObjectURL(new Blob([xml],{type:'application/vnd.ms-excel'}));
+  const lk=document.createElement('a');lk.href=url;lk.download='relatorio-receptivos-'+y+'-'+String(mm).padStart(2,'0')+'.xml';document.body.appendChild(lk);lk.click();lk.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
 }
 document.addEventListener('input',e=>{const t=e.target;if(t.dataset&&t.dataset.rk)REL.over[t.dataset.rk]=t.value;});
 document.addEventListener('click',e=>{const b=e.target.closest('[data-rel]');if(!b)return;if(b.dataset.rel==='imprimir')window.print();else if(b.dataset.rel==='excel')relExcel();});
