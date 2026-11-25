@@ -257,6 +257,9 @@ body.pipbody{padding:10px}
 .kpi2>span{font-size:12px;color:var(--muted);font-weight:600}
 .kpi2 small{font-size:12px;color:var(--muted)}
 .rin.kv{font-size:24px;font-weight:800;text-align:left;padding:0;width:100%}
+.rv{display:block;color:var(--ink)}
+.rv.kv{font-size:24px;font-weight:800}
+.rv.num{text-align:right;font-weight:600}
 .rel-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px;margin-top:6px}
 .rel-grid h2{font-size:15px;margin:14px 0 8px}
 .bcell{width:38%;min-width:120px}
@@ -1071,7 +1074,10 @@ function renderRel(m){
   const k=S.mes;const c=calcMes(k);const doc=S.meses[k]||{};const {y,m:mm}=partsOf(k);
   const comp=doc.comparativo>0?doc.comparativo:null;
   REL.campos=[];
-  const campo=(grupo,rotulo,id,def,cls)=>{REL.campos.push({grupo,rotulo,id,def});return `<input class="rin ${cls||''}" data-rk="${esc(id)}" value="${esc(relOv(id,def))}" aria-label="${esc(rotulo)}">`;};
+  // Só o título é editável; os números são calculados dos lançamentos do mês e não mudam na tela.
+  const campo=(grupo,rotulo,id,def,cls)=>{REL.campos.push({grupo,rotulo,id,def});
+    if(id==='titulo')return `<input class="rin ${cls||''}" data-rk="${esc(id)}" value="${esc(relOv(id,def))}" aria-label="${esc(rotulo)}">`;
+    return `<span class="rv ${cls||''}">${esc(def)}</span>`;};
   const mesCurto=MES_CURTO[mm-1]+'/'+(y-1);
   const titulo=`RELATÓRIO MENSAL - RECEPTIVOS ${MES_LABEL[mm-1].toUpperCase()} ${y}`;
   const meta=pct(S.cfg.meta,0);
@@ -1103,7 +1109,7 @@ function renderRel(m){
   origs.forEach(o=>{h+=`<tr><td>${esc(o.nome)}</td><td class="n">${campo('Origens',o.nome,'orig:'+o.nome,fmt(o.n),'num')}</td><td class="bcell"><div class="rbar"><i style="width:${Math.round(100*o.n/maxO)}%"></i></div></td></tr>`;});
   h+=`<tr class="tot"><th>Total de origens</th><th class="n">${campo('Origens','Total de origens','orig:total',fmt(c.totOrig),'num')}</th><th></th></tr></tbody></table></div></div>`;
   h+='</div>';
-  h+='<p class="note">Os campos são editáveis e ficam na tela até recarregar. O Excel e o PDF saem com o que está nos campos.</p>';
+  h+='<p class="note">Números calculados dos lançamentos do mês. Só o título é editável.</p>';
   h+='<p class="note">O total de origens pode ser maior que o total de leads: inclui Eventos e lançamentos mensais de origem.</p></div>';
   m.innerHTML=h;
 }
