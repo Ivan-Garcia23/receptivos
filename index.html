@@ -248,6 +248,13 @@ body.pipbody{padding:10px}
 .avisopre{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:40;max-width:min(360px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--accent);border-radius:14px;padding:14px 16px;box-shadow:0 12px 32px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:10px}
 .avisopre[hidden]{display:none}
 .avact{display:flex;gap:8px;justify-content:flex-end}
+.relatorio h2{font-size:15px;margin:18px 0 8px}
+.rtitulo{width:100%;font-size:18px;font-weight:700;margin-bottom:4px}
+.rin{border:1px solid transparent;background:transparent;color:var(--ink);padding:4px 6px;border-radius:6px;min-width:0}
+.rin:hover,.rin:focus{border-color:var(--line);background:var(--surface);outline:none}
+.rin.num{text-align:right;width:140px}
+.rtitulo{text-align:left}
+@media print{.top,.bar,#wiz,#toast,.avisopre,.tabs,#btn-sair{display:none!important}.relatorio{border:0}.rin{border-color:transparent!important}}
 .wtag{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:color-mix(in srgb,var(--meta) 22%,transparent);color:var(--meta)}
 .metacfg{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;padding:12px 18px}
 .metacfg h2{margin:0}
@@ -285,7 +292,7 @@ body.is-auth .tabs,body.is-auth #btn-sair{display:none}
 <header class="top"><div class="top-in">
   <div class="brand"><svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><rect x="1" y="1" width="24" height="24" rx="7" fill="var(--accent)"/><path d="M13 5v10m0 0-4-4m4 4 4-4M7 17v2.5h12V17" stroke="var(--accent-ink)" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Receptivos</div>
   <span class="status" id="status" aria-live="polite"></span>
-  <nav class="tabs" aria-label="Seções"><button class="tab" data-v="painel">Painel</button><button class="tab" data-v="lancar">Lançar</button><button class="tab" data-v="pre">Pré-cadastros<span class="tabn" id="pre-n"></span></button><button class="tab" data-v="config">Configurações</button></nav>
+  <nav class="tabs" aria-label="Seções"><button class="tab" data-v="painel">Painel</button><button class="tab" data-v="lancar">Lançar</button><button class="tab" data-v="pre">Pré-cadastros<span class="tabn" id="pre-n"></span></button><button class="tab" data-v="rel">Relatório</button><button class="tab" data-v="config">Configurações</button></nav>
   <button class="btn sm" id="btn-sair" hidden>Sair</button>
 </div></header>
 <main id="main"></main>
@@ -369,7 +376,7 @@ const hoje=new Date();
 const S={db:null,user:null,canWrite:true,cfg:null,meses:{},ready:false,falha:null,
   view:'painel',mes:keyOf(hoje.getFullYear(),hoje.getMonth()+1),modo:'mes',
   dirty:{},saving:{},pending:{},timers:{},showOrig:false,lancModo:'dia',diaN:hoje.getDate(),remotoPendente:false,importado:null,dl:null};
-(function(){const h=location.hash.replace('#','');if(['painel','lancar','pre','config','mini'].includes(h))S.view=h;})();
+(function(){const h=location.hash.replace('#','');if(['painel','lancar','pre','rel','config','mini'].includes(h))S.view=h;})();
 
 // ===== cálculo =====
 function calcMes(k){
@@ -418,6 +425,7 @@ function render(){
   else if(S.view==='mini')m.innerHTML=miniHtml(false);
   else if(S.view==='lancar')renderLancar(m);
   else if(S.view==='pre')renderPre(m);
+  else if(S.view==='rel')renderRel(m);
   else renderConfig(m);
   if(S.ready)preAssinar();
   updPreBadge();updStatus();
@@ -1030,6 +1038,43 @@ document.addEventListener('keydown',e=>{
   if(PRE.sel&&e.key==='Escape')preFechar();
   if(e.key==='Enter'&&e.target.matches&&e.target.matches('tr[data-pre]'))preAbrir(e.target.dataset.pre);
 });
+// ===== relatório mensal (campos editáveis; edições ficam na tela até recarregar) =====
+const REL={over:{}};
+function renderRel(m){
+  const k=S.mes;const c=calcMes(k);const doc=S.meses[k]||{};const {y,m:mm}=partsOf(k);
+  const comp=doc.comparativo>0?doc.comparativo:null;
+  const ov=(id,def)=>(id in REL.over?REL.over[id]:def);
+  const campo=(id,def,cls='')=>`<input class="rin ${cls}" data-rk="${esc(id)}" value="${esc(ov(id,def))}" aria-label="${esc(id)}">`;
+  const mesCurto=MES_CURTO[mm-1]+'/'+(y-1);
+  const ind=[
+    ['Conversão (distribuídos ÷ base, meta '+pct(S.cfg.meta,0)+')','ind:conv',pct(c.alc)],
+    ['Total de leads no mês','ind:total',fmt(c.total)],
+    ['Distribuídos aos vendedores','ind:dist',fmt(c.dist)],
+    ['Sem vendedor','ind:sem',fmt(c.sem)],
+    ['Comparativo '+mesCurto+' (total)','ind:comp',comp?fmt(comp):'—'],
+    ['Variação contra '+mesCurto,'ind:var',comp?pct((c.total-comp)/comp):'—']
+  ];
+  const vends=(S.cfg.vendedores||[]).filter(v=>v.ativo||(c.vend[v.id]||0)>0).map(v=>({nome:v.nome,n:c.vend[v.id]||0})).sort((a,b)=>b.n-a.n);
+  const origs=(S.cfg.origens||[]).filter(o=>o.ativo||(c.orig[o.id]||0)>0).map(o=>({nome:o.nome,n:c.orig[o.id]||0})).sort((a,b)=>b.n-a.n);
+  const titulo=`RELATÓRIO MENSAL - RECEPTIVOS ${MES_LABEL[mm-1].toUpperCase()} ${y}`;
+  let h=`<div class="bar"><h1>Relatório</h1>${monthNav()}<div class="spacer"></div><button class="btn" data-rel="imprimir">Imprimir / salvar PDF</button></div>`;
+  h+=`<div class="card relatorio"><input class="rin rtitulo" data-rk="titulo" value="${esc(ov('titulo',titulo))}" aria-label="Título do relatório">`;
+  h+='<h2>Indicadores</h2><div class="tbl-wrap"><table><thead><tr><th>Indicador</th><th class="n">Valor</th></tr></thead><tbody>';
+  ind.forEach(([nome,id,val])=>{h+=`<tr><td>${esc(nome)}</td><td class="n">${campo(id,val,'num')}</td></tr>`;});
+  h+='</tbody></table></div>';
+  h+='<h2>Distribuição por vendedor</h2><div class="tbl-wrap"><table><thead><tr><th>Vendedor</th><th class="n">Receptivos distribuídos</th></tr></thead><tbody>';
+  vends.forEach(v=>{h+=`<tr><td>${esc(v.nome)}</td><td class="n">${campo('vend:'+v.nome,fmt(v.n),'num')}</td></tr>`;});
+  h+=`<tr><td>Sem vendedor</td><td class="n">${campo('vend:sem',fmt(c.sem),'num')}</td></tr>`;
+  h+=`<tr><th>Total</th><th class="n">${campo('vend:total',fmt(c.total),'num')}</th></tr></tbody></table></div>`;
+  h+='<h2>Total por origem</h2><div class="tbl-wrap"><table><thead><tr><th>Origem</th><th class="n">Total</th></tr></thead><tbody>';
+  origs.forEach(o=>{h+=`<tr><td>${esc(o.nome)}</td><td class="n">${campo('orig:'+o.nome,fmt(o.n),'num')}</td></tr>`;});
+  h+=`<tr><th>Total de origens</th><th class="n">${campo('orig:total',fmt(c.totOrig),'num')}</th></tr></tbody></table></div>`;
+  h+='<p class="note">O total de origens pode ser maior que o total de leads: inclui Eventos e lançamentos mensais de origem.</p>';
+  h+=`<p class="note">Fonte: lançamentos do mês em ${esc(mesNome(k))}. Comparativo: valor informado no lançamento do mês.</p></div>`;
+  m.innerHTML=h;
+}
+document.addEventListener('input',e=>{const t=e.target;if(t.dataset&&t.dataset.rk)REL.over[t.dataset.rk]=t.value;});
+document.addEventListener('click',e=>{if(e.target.closest('[data-rel="imprimir"]'))window.print();});
 // ===== configurações =====
 function renderConfig(m){
   const ro=S.canWrite?'':'disabled';
