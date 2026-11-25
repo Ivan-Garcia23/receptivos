@@ -1115,10 +1115,37 @@ function renderRel(m){
 }
 // Excel no layout do modelo: título e "Mês" centralizados com borda, seções com borda,
 // cabeçalho e linhas alternadas em cinza, totais em negrito. Formato Excel XML 2003 (abre direto no Excel).
+// Gera um .xlsx real (Office Open XML) sem bibliotecas: zip sem compressão + partes XML com estilos.
+function xlsxCrc(bytes){
+  if(!xlsxCrc.t){const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}xlsxCrc.t=t;}
+  let c=0xFFFFFFFF;for(let i=0;i<bytes.length;i++)c=xlsxCrc.t[(c^bytes[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0;
+}
+function xlsxZip(files){
+  const enc=new TextEncoder();const partes=[],central=[];let off=0;
+  files.forEach(f=>{
+    const nb=enc.encode(f.name),crc=xlsxCrc(f.data),n=f.data.length;
+    const lh=new Uint8Array(30+nb.length),lv=new DataView(lh.buffer);
+    lv.setUint32(0,0x04034b50,true);lv.setUint16(4,20,true);lv.setUint16(6,0x0800,true);lv.setUint16(8,0,true);
+    lv.setUint16(10,0,true);lv.setUint16(12,0x21,true);lv.setUint32(14,crc,true);lv.setUint32(18,n,true);lv.setUint32(22,n,true);
+    lv.setUint16(26,nb.length,true);lv.setUint16(28,0,true);lh.set(nb,30);
+    partes.push(lh,f.data);
+    const ch=new Uint8Array(46+nb.length),cv=new DataView(ch.buffer);
+    cv.setUint32(0,0x02014b50,true);cv.setUint16(4,20,true);cv.setUint16(6,20,true);cv.setUint16(8,0x0800,true);
+    cv.setUint16(10,0,true);cv.setUint16(12,0,true);cv.setUint16(14,0x21,true);cv.setUint32(16,crc,true);
+    cv.setUint32(20,n,true);cv.setUint32(24,n,true);cv.setUint16(28,nb.length,true);cv.setUint32(42,off,true);ch.set(nb,46);
+    central.push(ch);off+=lh.length+n;
+  });
+  const cdTam=central.reduce((a,b)=>a+b.length,0);
+  const fim=new Uint8Array(22),fv=new DataView(fim.buffer);
+  fv.setUint32(0,0x06054b50,true);fv.setUint16(8,files.length,true);fv.setUint16(10,files.length,true);
+  fv.setUint32(12,cdTam,true);fv.setUint32(16,off,true);
+  return new Blob([...partes,...central,fim],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
 function relExcel(){
   if(!REL.campos.length){toast('Abra a aba Relatório antes de exportar.',3500);return;}
   const k=S.mes;const {y,m:mm}=partsOf(k);
   const titulo=relOv('titulo',`RELATÓRIO MENSAL - RECEPTIVOS ${MES_LABEL[mm-1].toUpperCase()} ${y}`);
+  // Mesmo conteúdo da tela: título, mês, seções com itens, totais destacados e linhas alternadas.
   const L=[{t:'titulo',texto:titulo},{t:'meta',a:'Mês',b:mesNome(k)},{t:'vazia'}];
   let grupo=null,idx=0;
   REL.campos.filter(f=>f.grupo!=='Título').forEach(f=>{
@@ -1133,41 +1160,54 @@ function relExcel(){
     const tot=/^(Total|Total de origens)$/.test(f.rotulo);
     L.push({t:tot?'tot':'linha',a:f.rotulo,b:val,pc,cinza:!tot&&(idx++%2===1)});
   });
-  // Estilos (um por combinação) e linhas em XML
-  const ST={};const esc2=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  const st=(o)=>{const key=JSON.stringify(o);if(!ST[key])ST[key]={id:'s'+Object.keys(ST).length,o};return ST[key].id;};
-  const cel=(texto,o,merge)=>{const id=st(o);const num=typeof texto==='number';
-    return `<Cell ss:StyleID="${id}"${merge?' ss:MergeAcross="1"':''}><Data ss:Type="${num?'Number':'String'}">${num?texto:esc2(texto)}</Data></Cell>`;};
-  const CINZA='#D9D9D9';
-  const base={centro:true,negrito:false,fill:null,fmt:null};
-  const rows=L.map(r=>{
+  // Estilos: um xf por combinação (negrito, cinza, porcentagem), todos com borda fina e centralizados.
+  const XF=[{fonte:0,fill:0,fmt:0,borda:0,centro:false}];const xfId=o=>{const key=JSON.stringify(o);let i=XF.findIndex(x=>JSON.stringify(x)===key);if(i<0){XF.push(o);i=XF.length-1;}return i;};
+  const estilo=(o)=>xfId({fonte:o.negrito?1:0,fill:o.cinza?2:0,fmt:o.pc?1:0,borda:1,centro:true});
+  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const merges=[];let linhaNum=0;
+  const celula=(ref,valor,o)=>{const s=estilo(o);
+    if(typeof valor==='number')return `<c r="${ref}" s="${s}"><v>${valor}</v></c>`;
+    return `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${esc(valor)}</t></is></c>`;};
+  const linhas=L.map(r=>{
+    linhaNum++;const n=linhaNum;
     if(r.t==='vazia')return '';
-    if(r.t==='titulo')return `<Row ss:Height="22">${cel(r.texto,{...base,negrito:true},true)}</Row>`;
-    if(r.t==='meta')return `<Row>${cel(r.a,{...base,fill:CINZA})}${cel(r.b,{...base,fill:CINZA})}</Row>`;
-    if(r.t==='sec')return `<Row>${cel(r.texto,base,true)}</Row>`;
-    if(r.t==='hdr')return `<Row>${cel(r.a,{...base,fill:CINZA})}${cel(r.b,{...base,fill:CINZA})}</Row>`;
-    const fill=r.t==='tot'?CINZA:(r.cinza?CINZA:null);
-    const negrito=r.t==='tot';
-    const fmt=r.pc?'0.0%':null;
-    return `<Row>${cel(r.a,{...base,fill,negrito})}${cel(typeof r.b==='number'?r.b:String(r.b),{...base,fill,negrito,fmt})}</Row>`;
-  }).join('\n');
-  const borda=p=>`<Border ss:Position="${p}" ss:LineStyle="Continuous" ss:Weight="1"/>`;
-  const estilos=Object.values(ST).map(({id,o})=>
-    `<Style ss:ID="${id}"><Alignment ss:Horizontal="${o.centro?'Center':'Left'}" ss:Vertical="Center"/>`+
-    `<Borders>${borda('Top')}${borda('Bottom')}${borda('Left')}${borda('Right')}</Borders>`+
-    `<Font ss:FontName="Calibri" ss:Size="11" ss:Bold="${o.negrito?1:0}"/>`+
-    (o.fill?`<Interior ss:Color="${o.fill}" ss:Pattern="Solid"/>`:'')+
-    (o.fmt?`<NumberFormat ss:Format="${o.fmt}"/>`:'')+
-    `</Style>`).join('');
-  const xml=`<?xml version="1.0" encoding="UTF-8"?>\n<?mso-application progid="Excel.Sheet"?>\n`+
-    `<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">`+
-    `<Styles>${estilos}</Styles>`+
-    `<Worksheet ss:Name="Relatório ${esc2(MES_CURTO[mm-1]+' '+y)}"><Table ss:DefaultRowHeight="18">`+
-    `<Column ss:Width="240"/><Column ss:Width="150"/>${rows}</Table>`+
-    `<WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel"><Selected/><ProtectObjects>False</ProtectObjects><ProtectScenarios>False</ProtectScenarios></WorksheetOptions>`+
-    `</Worksheet></Workbook>`;
-  const url=URL.createObjectURL(new Blob([xml],{type:'application/vnd.ms-excel'}));
-  const lk=document.createElement('a');lk.href=url;lk.download='relatorio-receptivos-'+y+'-'+String(mm).padStart(2,'0')+'.xml';document.body.appendChild(lk);lk.click();lk.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
+    if(r.t==='titulo'){merges.push(`A${n}:B${n}`);return `<row r="${n}" ht="22" customHeight="1">${celula('A'+n,r.texto,{negrito:true,cinza:false})}<c r="B${n}" s="${estilo({negrito:true})}"/></row>`;}
+    if(r.t==='sec'){merges.push(`A${n}:B${n}`);return `<row r="${n}">${celula('A'+n,r.texto,{})}<c r="B${n}" s="${estilo({})}"/></row>`;}
+    if(r.t==='meta'||r.t==='hdr')return `<row r="${n}">${celula('A'+n,r.a,{cinza:true})}${celula('B'+n,r.b,{cinza:true})}</row>`;
+    const cinza=r.t==='tot'||r.cinza,negrito=r.t==='tot';
+    return `<row r="${n}">${celula('A'+n,r.a,{negrito,cinza})}${celula('B'+n,typeof r.b==='number'?r.b:String(r.b),{negrito,cinza,pc:r.pc})}</row>`;
+  }).join('');
+  const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`+
+    `<dimension ref="A1:B${linhaNum}"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/>`+
+    `<cols><col min="1" max="1" width="36" customWidth="1"/><col min="2" max="2" width="20" customWidth="1"/></cols>`+
+    `<sheetData>${linhas}</sheetData>`+
+    (merges.length?`<mergeCells count="${merges.length}">${merges.map(m=>`<mergeCell ref="${m}"/>`).join('')}</mergeCells>`:'')+
+    `<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>`;
+  const xfs=XF.map(o=>`<xf numFmtId="${o.fmt?164:0}" fontId="${o.fonte}" fillId="${o.fill}" borderId="${o.borda}" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"${o.centro?'><alignment horizontal="center" vertical="center"/></xf>':'/>'}`).join('');
+  const styles=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`+
+    `<numFmts count="1"><numFmt numFmtId="164" formatCode="0.0%"/></numFmts>`+
+    `<fonts count="2"><font><sz val="11"/><name val="Calibri"/><family val="2"/></font><font><b/><sz val="11"/><name val="Calibri"/><family val="2"/></font></fonts>`+
+    `<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFD9D9D9"/><bgColor indexed="64"/></patternFill></fill></fills>`+
+    `<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color indexed="64"/></left><right style="thin"><color indexed="64"/></right><top style="thin"><color indexed="64"/></top><bottom style="thin"><color indexed="64"/></bottom><diagonal/></border></borders>`+
+    `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>`+
+    `<cellXfs count="${XF.length}">${xfs}</cellXfs>`+
+    `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  const nomeAba=('Relatório '+MES_CURTO[mm-1]+' '+y).slice(0,31);
+  const workbook=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${esc(nomeAba)}" sheetId="1" r:id="rId1"/></sheets></workbook>`;
+  const wbRels=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+  const rels=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
+  const tipos=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`;
+  const enc=new TextEncoder();
+  const blob=xlsxZip([
+    {name:'[Content_Types].xml',data:enc.encode(tipos)},
+    {name:'_rels/.rels',data:enc.encode(rels)},
+    {name:'xl/workbook.xml',data:enc.encode(workbook)},
+    {name:'xl/_rels/workbook.xml.rels',data:enc.encode(wbRels)},
+    {name:'xl/worksheets/sheet1.xml',data:enc.encode(sheet)},
+    {name:'xl/styles.xml',data:enc.encode(styles)}
+  ]);
+  const url=URL.createObjectURL(blob);
+  const lk=document.createElement('a');lk.href=url;lk.download='relatorio-receptivos-'+y+'-'+String(mm).padStart(2,'0')+'.xlsx';document.body.appendChild(lk);lk.click();lk.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
 }
 document.addEventListener('input',e=>{const t=e.target;if(t.dataset&&t.dataset.rk)REL.over[t.dataset.rk]=t.value;});
 document.addEventListener('click',e=>{const b=e.target.closest('[data-rel]');if(!b)return;if(b.dataset.rel==='imprimir')window.print();else if(b.dataset.rel==='excel')relExcel();});
