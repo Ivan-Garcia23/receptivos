@@ -249,6 +249,21 @@ body.pipbody{padding:10px}
 .avisopre[hidden]{display:none}
 .avact{display:flex;gap:8px;justify-content:flex-end}
 .relatorio h2{font-size:15px;margin:18px 0 8px}
+.rel-head{display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
+.rel-eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.rtitulo{font-size:22px;font-weight:800;line-height:1.2}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:14px 0 6px}
+.kpi2{background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.kpi2>span{font-size:12px;color:var(--muted);font-weight:600}
+.kpi2 small{font-size:12px;color:var(--muted)}
+.rin.kv{font-size:24px;font-weight:800;text-align:left;padding:0;width:100%}
+.rel-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px;margin-top:6px}
+.rel-grid h2{font-size:15px;margin:14px 0 8px}
+.bcell{width:38%;min-width:120px}
+.rbar{height:8px;background:var(--surface2);border-radius:4px;overflow:hidden}
+.rbar i{display:block;height:100%;background:var(--accent);border-radius:4px}
+tr.tot th{background:var(--surface2)}
+.relatorio .note{margin-top:14px}
 .rtitulo{width:100%;font-size:18px;font-weight:700;margin-bottom:4px}
 .rin{border:1px solid transparent;background:transparent;color:var(--ink);padding:4px 6px;border-radius:6px;min-width:0}
 .rin:hover,.rin:focus{border-color:var(--line);background:var(--surface);outline:none}
@@ -1040,41 +1055,79 @@ document.addEventListener('keydown',e=>{
 });
 // ===== relatório mensal (campos editáveis; edições ficam na tela até recarregar) =====
 const REL={over:{}};
+const relOv=(id,def)=>(id in REL.over?REL.over[id]:def);
+// Lê um valor digitado ("86,5%", "1.234", "-32,1%") como número; texto que não é número volta como está.
+function relNum(s){
+  let t=String(s).trim();if(t==='')return '';
+  const pc=/%$/.test(t);t=t.replace(/%$/,'').trim();
+  if(!/^-?[\d.,\s]+$/.test(t))return String(s).trim();
+  if(t.includes(','))t=t.replace(/\./g,'').replace(',','.');
+  else if(/^-?\d{1,3}(\.\d{3})+$/.test(t))t=t.replace(/\./g,'');
+  t=t.replace(/\s/g,'');const n=Number(t);
+  if(isNaN(n))return String(s).trim();
+  return pc?{n:n/100,pc:true}:n;
+}
 function renderRel(m){
   const k=S.mes;const c=calcMes(k);const doc=S.meses[k]||{};const {y,m:mm}=partsOf(k);
   const comp=doc.comparativo>0?doc.comparativo:null;
-  const ov=(id,def)=>(id in REL.over?REL.over[id]:def);
-  const campo=(id,def,cls='')=>`<input class="rin ${cls}" data-rk="${esc(id)}" value="${esc(ov(id,def))}" aria-label="${esc(id)}">`;
+  REL.campos=[];
+  const campo=(grupo,rotulo,id,def,cls)=>{REL.campos.push({grupo,rotulo,id,def});return `<input class="rin ${cls||''}" data-rk="${esc(id)}" value="${esc(relOv(id,def))}" aria-label="${esc(rotulo)}">`;};
   const mesCurto=MES_CURTO[mm-1]+'/'+(y-1);
-  const ind=[
-    ['Conversão (distribuídos ÷ base, meta '+pct(S.cfg.meta,0)+')','ind:conv',pct(c.alc)],
-    ['Total de leads no mês','ind:total',fmt(c.total)],
-    ['Distribuídos aos vendedores','ind:dist',fmt(c.dist)],
-    ['Sem vendedor','ind:sem',fmt(c.sem)],
-    ['Comparativo '+mesCurto+' (total)','ind:comp',comp?fmt(comp):'—'],
-    ['Variação contra '+mesCurto,'ind:var',comp?pct((c.total-comp)/comp):'—']
-  ];
-  const vends=(S.cfg.vendedores||[]).filter(v=>v.ativo||(c.vend[v.id]||0)>0).map(v=>({nome:v.nome,n:c.vend[v.id]||0})).sort((a,b)=>b.n-a.n);
-  const origs=(S.cfg.origens||[]).filter(o=>o.ativo||(c.orig[o.id]||0)>0).map(o=>({nome:o.nome,n:c.orig[o.id]||0})).sort((a,b)=>b.n-a.n);
   const titulo=`RELATÓRIO MENSAL - RECEPTIVOS ${MES_LABEL[mm-1].toUpperCase()} ${y}`;
-  let h=`<div class="bar"><h1>Relatório</h1>${monthNav()}<div class="spacer"></div><button class="btn" data-rel="imprimir">Imprimir / salvar PDF</button></div>`;
-  h+=`<div class="card relatorio"><input class="rin rtitulo" data-rk="titulo" value="${esc(ov('titulo',titulo))}" aria-label="Título do relatório">`;
-  h+='<h2>Indicadores</h2><div class="tbl-wrap"><table><thead><tr><th>Indicador</th><th class="n">Valor</th></tr></thead><tbody>';
-  ind.forEach(([nome,id,val])=>{h+=`<tr><td>${esc(nome)}</td><td class="n">${campo(id,val,'num')}</td></tr>`;});
-  h+='</tbody></table></div>';
-  h+='<h2>Distribuição por vendedor</h2><div class="tbl-wrap"><table><thead><tr><th>Vendedor</th><th class="n">Receptivos distribuídos</th></tr></thead><tbody>';
-  vends.forEach(v=>{h+=`<tr><td>${esc(v.nome)}</td><td class="n">${campo('vend:'+v.nome,fmt(v.n),'num')}</td></tr>`;});
-  h+=`<tr><td>Sem vendedor</td><td class="n">${campo('vend:sem',fmt(c.sem),'num')}</td></tr>`;
-  h+=`<tr><th>Total</th><th class="n">${campo('vend:total',fmt(c.total),'num')}</th></tr></tbody></table></div>`;
-  h+='<h2>Total por origem</h2><div class="tbl-wrap"><table><thead><tr><th>Origem</th><th class="n">Total</th></tr></thead><tbody>';
-  origs.forEach(o=>{h+=`<tr><td>${esc(o.nome)}</td><td class="n">${campo('orig:'+o.nome,fmt(o.n),'num')}</td></tr>`;});
-  h+=`<tr><th>Total de origens</th><th class="n">${campo('orig:total',fmt(c.totOrig),'num')}</th></tr></tbody></table></div>`;
-  h+='<p class="note">O total de origens pode ser maior que o total de leads: inclui Eventos e lançamentos mensais de origem.</p>';
-  h+=`<p class="note">Fonte: lançamentos do mês em ${esc(mesNome(k))}. Comparativo: valor informado no lançamento do mês.</p></div>`;
+  const meta=pct(S.cfg.meta,0);
+  const okMeta=c.alc!=null&&c.alc>=S.cfg.meta;
+  const variacao=comp?pct((c.total-comp)/comp):'—';
+  const kpi=(rot,id,def,sub,cor)=>`<div class="kpi2"><span>${esc(rot)}</span>${campo('Indicadores',rot,id,def,'kv')}<small${cor?` style="color:${cor}"`:''}>${sub}</small></div>`;
+  const ind=(rot,id,def)=>`<tr><td>${esc(rot)}</td><td class="n">${campo('Indicadores',rot,id,def,'num')}</td></tr>`;
+  let h=`<div class="bar"><h1>Relatório</h1>${monthNav()}<div class="spacer"></div><button class="btn" data-rel="excel">Exportar para Excel</button><button class="btn" data-rel="imprimir">Imprimir / PDF</button></div>`;
+  h+=`<div class="card relatorio"><div class="rel-head"><span class="rel-eyebrow">Relatório mensal · ${esc(mesNome(k))}</span>${campo('Título','Título','titulo',titulo,'rtitulo')}</div>`;
+  h+='<div class="kpis">';
+  h+=kpi('Conversão','ind:conv',pct(c.alc),okMeta?`Meta de ${esc(meta)} batida`:`Abaixo da meta de ${esc(meta)}`,okMeta?'var(--ok)':'var(--bad)');
+  h+=kpi('Total de leads','ind:total',fmt(c.total),'receptivos no mês');
+  h+=kpi('Distribuídos','ind:dist',fmt(c.dist),`${fmt(c.sem)} sem vendedor`);
+  h+=kpi('Comparativo '+mesCurto,'ind:comp',comp?fmt(comp):'—','total do ano anterior');
+  h+=kpi('Variação','ind:var',variacao,'contra o ano anterior');
+  h+='</div>';
+  // Vendedores (barras proporcionais)
+  const vends=(S.cfg.vendedores||[]).filter(v=>v.ativo||(c.vend[v.id]||0)>0).map(v=>({nome:v.nome,n:c.vend[v.id]||0})).sort((a,b)=>b.n-a.n);
+  const maxV=Math.max(1,...vends.map(v=>v.n),c.sem);
+  const barra=n=>`<div class="rbar"><i style="width:${Math.round(100*n/maxV)}%"></i></div>`;
+  h+='<div class="rel-grid"><div><h2>Distribuição por vendedor</h2><div class="tbl-wrap"><table><thead><tr><th>Vendedor</th><th class="n">Distribuídos</th><th class="bcell"></th></tr></thead><tbody>';
+  vends.forEach(v=>{h+=`<tr><td>${esc(v.nome)}</td><td class="n">${campo('Vendedores',v.nome,'vend:'+v.nome,fmt(v.n),'num')}</td><td class="bcell">${barra(v.n)}</td></tr>`;});
+  h+=`<tr><td>Sem vendedor</td><td class="n">${campo('Vendedores','Sem vendedor','vend:sem',fmt(c.sem),'num')}</td><td class="bcell">${barra(c.sem)}</td></tr>`;
+  h+=`<tr class="tot"><th>Total</th><th class="n">${campo('Vendedores','Total','vend:total',fmt(c.total),'num')}</th><th></th></tr></tbody></table></div></div>`;
+  // Origens
+  const origs=(S.cfg.origens||[]).filter(o=>o.ativo||(c.orig[o.id]||0)>0).map(o=>({nome:o.nome,n:c.orig[o.id]||0})).sort((a,b)=>b.n-a.n);
+  const maxO=Math.max(1,...origs.map(o=>o.n));
+  h+='<div><h2>Total por origem</h2><div class="tbl-wrap"><table><thead><tr><th>Origem</th><th class="n">Total</th><th class="bcell"></th></tr></thead><tbody>';
+  origs.forEach(o=>{h+=`<tr><td>${esc(o.nome)}</td><td class="n">${campo('Origens',o.nome,'orig:'+o.nome,fmt(o.n),'num')}</td><td class="bcell"><div class="rbar"><i style="width:${Math.round(100*o.n/maxO)}%"></i></div></td></tr>`;});
+  h+=`<tr class="tot"><th>Total de origens</th><th class="n">${campo('Origens','Total de origens','orig:total',fmt(c.totOrig),'num')}</th><th></th></tr></tbody></table></div></div>`;
+  h+='</div>';
+  h+='<p class="note">Os campos são editáveis e ficam na tela até recarregar. O Excel e o PDF saem com o que está nos campos.</p>';
+  h+='<p class="note">O total de origens pode ser maior que o total de leads: inclui Eventos e lançamentos mensais de origem.</p></div>';
   m.innerHTML=h;
 }
+function relExcel(){
+  if(!window.XLSX){toast('A biblioteca de Excel não carregou. Recarregue a página.',4000);return;}
+  const k=S.mes;const {y,m:mm}=partsOf(k);
+  const titulo=relOv('titulo',`RELATÓRIO MENSAL - RECEPTIVOS ${MES_LABEL[mm-1].toUpperCase()} ${y}`);
+  const rows=[[titulo],['Mês',mesNome(k)]];const pctRows=[];let grupo=null;
+  REL.campos.filter(f=>f.grupo!=='Título').forEach(f=>{
+    if(f.grupo!==grupo){grupo=f.grupo;rows.push([]);rows.push([grupo.toUpperCase()]);rows.push(['Item','Valor']);}
+    const v=relNum(relOv(f.id,f.def));
+    if(v&&typeof v==='object'){pctRows.push(rows.length);rows.push([f.rotulo,Math.round(v.n*100000)/100000]);}
+    else rows.push([f.rotulo,v]);
+  });
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  pctRows.forEach(r=>{const a=XLSX.utils.encode_cell({r,c:1});if(ws[a])ws[a].z='0.0%';});
+  ws['!cols']=[{wch:48},{wch:20}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Relatório '+MES_CURTO[mm-1]+' '+y);
+  const data=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+  const url=URL.createObjectURL(new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  const lk=document.createElement('a');lk.href=url;lk.download='relatorio-receptivos-'+y+'-'+String(mm).padStart(2,'0')+'.xlsx';document.body.appendChild(lk);lk.click();lk.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
 document.addEventListener('input',e=>{const t=e.target;if(t.dataset&&t.dataset.rk)REL.over[t.dataset.rk]=t.value;});
-document.addEventListener('click',e=>{if(e.target.closest('[data-rel="imprimir"]'))window.print();});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-rel]');if(!b)return;if(b.dataset.rel==='imprimir')window.print();else if(b.dataset.rel==='excel')relExcel();});
 // ===== configurações =====
 function renderConfig(m){
   const ro=S.canWrite?'':'disabled';
